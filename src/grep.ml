@@ -76,6 +76,7 @@ let fetch_all ~jobs ~dst ~on_ready ~on_skip pkgs =
   result (Dir.delete ~recurse:true tmproot);
   let _exists : bool = result (Dir.create ~path:true tmproot) in
   let devnull = Unix.openfile "/dev/null" [Unix.O_RDWR] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close devnull) @@ fun () ->
   let running = Hashtbl.create jobs in
   let spawn pkg =
     let tmpdir = tmproot // pkg in
@@ -101,18 +102,16 @@ let fetch_all ~jobs ~dst ~on_ready ~on_skip pkgs =
                 result (Dir.delete ~recurse:true tmpdir);
                 on_skip pkg
   in
-  Fun.protect ~finally:(fun () -> Unix.close devnull) begin fun () ->
-    List.iter begin fun pkg ->
-      let pkgdir = dst // pkg in
-      if result (Dir.exists pkgdir) then
-        on_ready pkg pkgdir
-      else begin
-        if Hashtbl.length running >= jobs then wait_one ();
-        spawn pkg
-      end
-    end pkgs;
-    while Hashtbl.length running > 0 do wait_one () done
-  end
+  List.iter begin fun pkg ->
+    let pkgdir = dst // pkg in
+    if result (Dir.exists pkgdir) then
+      on_ready pkg pkgdir
+    else begin
+      if Int.compare (Hashtbl.length running) jobs >= 0 then wait_one ();
+      spawn pkg
+    end
+  end pkgs;
+  while Int.compare (Hashtbl.length running) 0 > 0 do wait_one () done
 
 let greps = [
   Cmd.v "rg"; (* ripgrep (fast, rust) *)
